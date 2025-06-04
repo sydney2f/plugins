@@ -1,5 +1,6 @@
 import { Icon } from '@iconify/react';
 import Deployment from '@kinvolk/headlamp-plugin/lib/K8s/deployment';
+import DaemonSet from '@kinvolk/headlamp-plugin/lib/k8s/daemonSet';
 import { useMemo } from 'react';
 import { helmReleaseClass } from './helm-releases/HelmReleaseList';
 import { FluxHelmReleaseDetailView } from './helm-releases/HelmReleaseSingle';
@@ -93,37 +94,47 @@ const helmReleaseSource = {
   useData() {
     const [deployments] = Deployment.useList();
     const [releases] = HelmRelease.useList();
+    const [daemonsets] = DaemonSet.useList();
 
     return useMemo(() => {
       if (!deployments || !releases) return null;
+
       const nodes = releases?.map(it => ({
         id: it.metadata.uid,
         kubeObject: it,
         detailsComponent: HelmReleaseDetails,
       }));
-      const edges = [];
+
+      const edges: any[] = [];
 
       releases?.forEach(release => {
         const { name, namespace } = release.metadata;
 
-        const deployment = deployments?.find(
-          it =>
-            it.metadata.labels?.['helm.toolkit.fluxcd.io/name'] === name &&
-            it.metadata.labels?.['helm.toolkit.fluxcd.io/namespace'] === namespace
-        );
+        const deployment = deployments?.filter(
+          d =>
+            d.metadata.labels?.['helm.toolkit.fluxcd.io/name'] === name &&
+            d.metadata.labels?.['helm.toolkit.fluxcd.io/namespace'] === namespace
+        ).forEach ( currdeployment => {
+          edges.push(makeKubeToKubeEdge(release, currdeployment));
+        })
 
-        if (deployment) {
-          edges.push(makeKubeToKubeEdge(release, deployment));
-        }
+        const daemonset = daemonsets?.filter(
+          ds =>
+            ds.metadata.labels?.['helm.toolkit.fluxcd.io/name'] === name &&
+            ds.metadata.labels?.['helm.toolkit.fluxcd.io/namespace'] === namespace
+        ).forEach ( currdaemonset => {
+          edges.push(makeKubeToKubeEdge(release, currdaemonset));
+        })
       });
 
       return {
         nodes,
         edges,
       };
-    }, [deployments, releases]);
+    }, [deployments, releases, daemonsets]);
   },
 };
+
 
 const kustomizationSource = {
   id: 'flux-kustomization',
@@ -132,19 +143,23 @@ const kustomizationSource = {
   useData() {
     const [deployments] = Deployment.useList();
     const [kustomizations] = Kustomization.useList();
+    const [releases] = HelmRelease.useList();
 
     return useMemo(() => {
-      if (!deployments || !kustomizations) return null;
+      if (!deployments || !kustomizations || !releases) return null;
+
       const nodes = kustomizations?.map(it => ({
         id: it.metadata.uid,
         kubeObject: it,
         detailsComponent: KustomizationDetails,
       }));
-      const edges = [];
 
-      kustomizations?.forEach(release => {
-        const { name, namespace } = release.metadata;
+      const edges: any[] = [];
 
+      kustomizations?.forEach(kustom => {
+        const { name, namespace } = kustom.metadata;
+
+        // Kustomization → Deployment
         deployments
           ?.filter(
             it =>
@@ -152,7 +167,18 @@ const kustomizationSource = {
               it.metadata.labels?.['kustomize.toolkit.fluxcd.io/namespace'] === namespace
           )
           .forEach(deployment => {
-            edges.push(makeKubeToKubeEdge(release, deployment));
+            edges.push(makeKubeToKubeEdge(kustom, deployment));
+          });
+
+        // Kustomization → HelmRelease (via label match)
+        releases
+          ?.filter(
+            it =>
+              it.metadata.labels?.['kustomize.toolkit.fluxcd.io/name'] === name &&
+              it.metadata.labels?.['kustomize.toolkit.fluxcd.io/namespace'] === namespace
+          )
+          .forEach(helmRelease => {
+            edges.push(makeKubeToKubeEdge(kustom, helmRelease));
           });
       });
 
@@ -160,7 +186,7 @@ const kustomizationSource = {
         nodes,
         edges,
       };
-    }, [deployments, kustomizations]);
+    }, [deployments, kustomizations, releases]);
   },
 };
 
@@ -168,6 +194,7 @@ const ociSource = {
   id: 'flex-oci-source',
   label: 'OCI Source',
   icon: <Icon icon="simple-icons:flux" width="100%" height="100%" color="rgb(50, 108, 229)" />,
+  isEnabledByDefault: false,
   useData() {
     const [kustomizations] = Kustomization.useList();
     const [ocisources] = OciSource.useList();
