@@ -1,18 +1,24 @@
 import { Icon } from '@iconify/react';
 import Deployment from '@kinvolk/headlamp-plugin/lib/K8s/deployment';
 import DaemonSet from '@kinvolk/headlamp-plugin/lib/k8s/daemonSet';
+import StatefulSet from '@kinvolk/headlamp-plugin/lib/k8s/statefulSet';
 import { useMemo } from 'react';
+import { useSelector } from 'react-redux';
 import { helmReleaseClass } from './helm-releases/HelmReleaseList';
 import { FluxHelmReleaseDetailView } from './helm-releases/HelmReleaseSingle';
 import { kustomizationClass } from './kustomizations/KustomizationList';
 import { FluxKustomizationDetailView } from './kustomizations/KustomizationSingle';
 import { helmRepositoryClass, ociRepositoryClass } from './sources/SourceList';
 import { FluxSourceDetailView } from './sources/SourceSingle';
+import { FilterState } from '@kinvolk/headlamp-plugin/lib/redux/filterSlice';
+
 
 const HelmRelease = helmReleaseClass();
 const HelmRepostory = helmRepositoryClass();
 const OciSource = ociRepositoryClass();
 const Kustomization = kustomizationClass();
+
+
 
 export const makeKubeToKubeEdge = (from: any, to: any): any => ({
   id: `${from.metadata.uid}-${to.metadata.uid}`,
@@ -95,6 +101,7 @@ const helmReleaseSource = {
     const [deployments] = Deployment.useList();
     const [releases] = HelmRelease.useList();
     const [daemonsets] = DaemonSet.useList();
+    const [statefulsets] = StatefulSet.useList();
 
     return useMemo(() => {
       if (!deployments || !releases) return null;
@@ -125,13 +132,21 @@ const helmReleaseSource = {
         ).forEach ( currdaemonset => {
           edges.push(makeKubeToKubeEdge(release, currdaemonset));
         })
+
+        const statefulset = statefulsets?.filter(
+          ds =>
+            ds.metadata.labels?.['helm.toolkit.fluxcd.io/name'] === name &&
+            ds.metadata.labels?.['helm.toolkit.fluxcd.io/namespace'] === namespace
+        ).forEach ( currstatefulset => {
+          edges.push(makeKubeToKubeEdge(release, currstatefulset));
+        })
       });
 
       return {
         nodes,
         edges,
       };
-    }, [deployments, releases, daemonsets]);
+    }, [deployments, releases, daemonsets, statefulsets]);
   },
 };
 
@@ -196,7 +211,11 @@ const ociSource = {
   icon: <Icon icon="simple-icons:flux" width="100%" height="100%" color="rgb(50, 108, 229)" />,
   isEnabledByDefault: false,
   useData() {
-    const [kustomizations] = Kustomization.useList();
+    const namespacesSet = useSelector(({ filter }: { filter: FilterState }) => filter.namespaces);
+    const namespacesMemo = useMemo(() => [...namespacesSet], [namespacesSet]);
+    // console.log(...namespacesSet)
+
+    const [kustomizations] = Kustomization.useList({ namespace: namespacesMemo });
     const [ocisources] = OciSource.useList();
 
     return useMemo(() => {
